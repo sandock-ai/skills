@@ -1,0 +1,6 @@
+interface:
+  display_name: "Sandock Agent Creator"
+  short_description: "Deploy a ready-to-chat Bunny Agent UI on Sandock"
+  default_prompt: "Use $sandock-agent-creator to deploy a Bunny Agent UI and return its temporary Preview URL."
+policy:
+  allow_implicit_invocation: true

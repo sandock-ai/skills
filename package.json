@@ -1,0 +1,12 @@
+{
+  "name": "sandock-ai-skills",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "test": "node --test skills/sandock-agent-creator/scripts/deploy.test.mjs"
+  },
+  "dependencies": {
+    "sandock": "2.4.0"
+  }
+}
