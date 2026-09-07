@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { createSandockClient } from "sandock";
 
 export const DEPLOYMENT = Object.freeze({
-  image: "node:24.18.0-bookworm-slim",
+  image: "node:24.18.0-bookworm",
   port: 3000,
   cpu: 2000,
   memory: 4096,
@@ -23,9 +23,9 @@ export const DEPLOYMENT = Object.freeze({
 
 export const SETUP_STEPS = Object.freeze([
   {
-    name: "install system dependencies",
+    name: "verify bundled system dependencies",
     command:
-      "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*",
+      "command -v git >/dev/null && git --version && test -r /etc/ssl/certs/ca-certificates.crt",
   },
   {
     name: "install pnpm",
@@ -49,8 +49,8 @@ export const SETUP_STEPS = Object.freeze([
     command: `cd ${DEPLOYMENT.appDirectory} && pnpm --filter @bunny-agent/runner-cli... build`,
   },
   {
-    name: "build Bunny Agent web",
-    command: `cd ${DEPLOYMENT.appDirectory} && pnpm --filter @bunny-agent/web build`,
+    name: "build Bunny Agent web and dependencies",
+    command: `cd ${DEPLOYMENT.appDirectory} && pnpm --filter @bunny-agent/web... build`,
   },
   {
     name: "start Bunny Agent web",

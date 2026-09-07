@@ -112,7 +112,7 @@ test("deploys in order with fixed resources and waits for consecutive readiness"
   assert.deepEqual(calls[0], [
     "create",
     {
-      image: "node:24.18.0-bookworm-slim",
+      image: "node:24.18.0-bookworm",
       title: "Bunny Agent",
       command: ["sleep", "infinity"],
       env: { SANDBOX_PROVIDER: "local" },
@@ -131,9 +131,12 @@ test("deploys in order with fixed resources and waits for consecutive readiness"
     shellCommands,
     SETUP_STEPS.map(({ command }) => command),
   );
+  assert.match(shellCommands[0], /command -v git/);
+  assert.match(shellCommands[0], /ca-certificates\.crt/);
+  assert.doesNotMatch(shellCommands.join("\n"), /apt-get/);
   assert.match(shellCommands.join("\n"), /pnpm install --frozen-lockfile/);
   assert.match(shellCommands.join("\n"), /--filter @bunny-agent\/runner-cli\.\.\. build/);
-  assert.match(shellCommands.join("\n"), /--filter @bunny-agent\/web build/);
+  assert.match(shellCommands.join("\n"), /--filter @bunny-agent\/web\.\.\. build/);
   assert.match(shellCommands.at(-1), /SANDBOX_PROVIDER=local/);
   assert.ok(shellOptions.every(({ timeoutMs }) => timeoutMs === DEPLOYMENT.shellTimeoutMs));
   assert.doesNotMatch(JSON.stringify(calls), /must-not-be-forwarded/);
