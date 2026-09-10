@@ -20,9 +20,15 @@ When `SANDOCK_API_KEY` is absent, use the host's browser capability instead of s
 
 1. Open `https://sandock.ai` in a browser.
 2. If the browser is unauthenticated or reaches a sign-in screen, navigate to `https://sandock.ai/sign-in`. Ask the user to complete sign-in in that browser and pause. Never request, inspect, or enter their password, passkey, OAuth approval, or multi-factor code. Resume in the same browser session after the user confirms completion or the authenticated dashboard becomes visible.
-3. Open the Dashboard, then Account Settings > API Keys. Existing API Key rows do not reveal their raw values. Reuse a raw key only when it is still visibly available from a creation completed during this same attempt; otherwise create exactly one dedicated key named `Sandock Agent Creator <UTC timestamp>` and capture the raw value shown once after creation.
-4. Do not create a second key after an interruption, and do not revoke, rotate, or otherwise modify existing keys. If it is unclear whether this attempt already created a key, pause and ask the user before creating another.
-5. Treat the raw key as a secret. Do not include it in chat, logs, screenshots, commits, files, shell history, or persistent shell configuration. Inject it into the deployment process through the host's secret/environment facility, retain it only for this deployment, and discard it afterward. If the host cannot pass it without exposing or persisting it, ask the user to set `SANDOCK_API_KEY` locally and resume after they confirm; do not ask them to send the value.
+3. Open the Dashboard, then Account Settings > API Keys. Existing rows identify keys but never reveal their raw values.
+4. Before clicking any button that creates a key, establish and verify an atomic secret handoff. When the browser exposes a host-local HTTP CDP endpoint, start `node "<skill-directory>/scripts/capture-and-deploy.mjs" --cdp-url <cdp-http-url> --json` in a background process and wait until its non-secret output contains `HANDOFF_ARMED`. The helper captures the create response, validates the key, and calls `deployAgent()` in the same process. Otherwise use a host secret destination that can pass the captured value only in a deployment child's `SANDOCK_API_KEY` environment variable. The listener or host secret destination must report that it is armed before creation is allowed.
+5. If the host cannot establish that handoff, do not create a key. Ask the user to set `SANDOCK_API_KEY` through the host's local secret/environment facility and resume after they confirm. Never ask them to paste the value into chat.
+6. Once the handoff is armed, create exactly one dedicated key named `Sandock Agent Creator <UTC timestamp>`. The helper or host handoff must capture the one-time key from the successful create response's current `raw` field or legacy `key` field, require the Sandock `sk-` plus 48 hexadecimal character format, validate it with one read-only Sandock API request, and immediately begin deployment. Keep the creation dialog and browser page open until the deployment process reports that it captured and validated the key.
+7. After the deployment process has accepted the key, release all in-memory references to it. Do not revoke or persist the dedicated key automatically; the user may manage it later in Sandock Account Settings.
+
+The raw key is a one-time secret. Do not use browser text extraction, screenshots, clipboard output, terminal output, command-line arguments, temporary files, shell history, browser storage, or heap snapshots to transfer or recover it. Those mechanisms either expose the secret or are unreliable after the UI discards its React state.
+
+If key creation succeeds but the atomic handoff fails, stop immediately. Do not navigate away, close the dialog, scan browser memory, or create a replacement key automatically. Report that no sandbox deployment was started, identify the newly created key by its non-secret name, and ask the user whether to create one replacement key in a fresh armed attempt. Do not revoke, rotate, or otherwise modify the failed-attempt key without explicit authorization.
 
 If no browser capability is available, provide `https://sandock.ai/sign-in`, ask the user to sign in and configure `SANDOCK_API_KEY` locally, then pause. Do not create a sandbox until a key is available.
 
@@ -35,6 +41,8 @@ node "<skill-directory>/scripts/deploy.mjs" --json
 ```
 
 Pass the acquired Sandock key only as `SANDOCK_API_KEY` in the child process environment. Do not interpolate it into the command string.
+
+`capture-and-deploy.mjs` imports `deployAgent` and calls it with an ephemeral environment object containing `SANDOCK_API_KEY`. Never log or return that environment object. Use `deploy.mjs` directly only when `SANDOCK_API_KEY` was already available before browser key creation.
 
 The script creates a one-hour sandbox, clones the latest public Bunny Agent `main`, records the exact commit, builds the runner and web app, starts the web service with `SANDBOX_PROVIDER=local`, creates a signed Preview URL, and waits for `/example` to return three consecutive successful HTTP responses.
 
