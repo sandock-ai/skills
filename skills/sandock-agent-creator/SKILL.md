@@ -1,6 +1,6 @@
 ---
 name: sandock-agent-creator
-description: Deploy the upstream Bunny Agent web UI into a temporary Sandock sandbox and return a signed Preview URL. Use when a user explicitly asks to create, launch, or deploy a Bunny Agent UI on Sandock; do not use for questions about Sandock or Bunny Agent that do not request a deployment.
+description: Deploy the upstream Bunny Agent web UI into a Sandock sandbox using the latest sandock-cli device authentication and return a signed Preview URL. Use when a user explicitly asks to create, launch, or deploy a Bunny Agent UI on Sandock; do not use for questions about Sandock or Bunny Agent that do not request a deployment.
 ---
 
 # Sandock Agent Creator
@@ -9,46 +9,83 @@ Deploy one unmodified checkout of `buda-ai/bunny-agent` from its latest public `
 
 ## Preconditions
 
-- Treat an explicit request to create or deploy the Agent UI as authorization to create one billable Sandock sandbox. Do not create a sandbox for research, explanation, planning, or a dry run.
-- Use `SANDOCK_API_KEY` from the local environment when it is already available. Never ask the user to paste a key into chat, print it, or pass it as a command-line argument.
-- Read optional `SANDOCK_BASE_URL` and `SANDOCK_SPACE_ID` from the local environment when present.
+- An explicit request to create or deploy the Agent UI authorizes one billable Sandock sandbox. Research, explanation, planning, skill maintenance, and dry runs do not authorize resource creation.
+- Use the latest published `sandock-cli` for every Sandock operation: device authentication, creation/lifetime, status, remote execution, signed Preview generation/revocation, and deletion. Do not import SDK modules, call Sandock HTTP APIs directly, read credential files, or execute legacy deployment/capture scripts. Let the CLI manage credentials; do not scrape browser API keys or ask the user to paste a key into chat.
+- `sandock-space` is optional. Only when the user explicitly supplies a space for this deployment, translate it to CLI `--space <space-id>`. Otherwise omit `--space` completely and use the service's personal-space default. Do not ask for a space, infer one from another project, or automatically use `SANDOCK_SPACE_ID` or a remembered space.
 - Do not collect, record, or upload an LLM key during deployment. The user configures it in the deployed Bunny Agent Settings page.
 
-## Acquire A Sandock API Key
+## Prepare The Latest CLI
 
-When `SANDOCK_API_KEY` is absent, use the host's browser capability instead of stopping immediately:
-
-1. Open `https://sandock.ai` in a browser.
-2. If the browser is unauthenticated or reaches a sign-in screen, navigate to `https://sandock.ai/sign-in`. Ask the user to complete sign-in in that browser and pause. Never request, inspect, or enter their password, passkey, OAuth approval, or multi-factor code. Resume in the same browser session after the user confirms completion or the authenticated dashboard becomes visible.
-3. Open the Dashboard, then Account Settings > API Keys. Existing rows identify keys but never reveal their raw values.
-4. Before clicking any button that creates a key, establish and verify an atomic secret handoff. When the browser exposes a host-local HTTP CDP endpoint, start `node "<skill-directory>/scripts/capture-and-deploy.mjs" --cdp-url <cdp-http-url> --json` in a background process and wait until its non-secret output contains `HANDOFF_ARMED`. The helper captures the create response, validates the key, and calls `deployAgent()` in the same process. Otherwise use a host secret destination that can pass the captured value only in a deployment child's `SANDOCK_API_KEY` environment variable. The listener or host secret destination must report that it is armed before creation is allowed.
-5. If the host cannot establish that handoff, do not create a key. Ask the user to set `SANDOCK_API_KEY` through the host's local secret/environment facility and resume after they confirm. Never ask them to paste the value into chat.
-6. Once the handoff is armed, create exactly one dedicated key named `Sandock Agent Creator <UTC timestamp>`. The helper or host handoff must capture the one-time key from the successful create response's current `raw` field or legacy `key` field, require the Sandock `sk-` plus 48 hexadecimal character format, validate it with one read-only Sandock API request, and immediately begin deployment. Keep the creation dialog and browser page open until the deployment process reports that it captured and validated the key.
-7. After the deployment process has accepted the key, release all in-memory references to it. Do not revoke or persist the dedicated key automatically; the user may manage it later in Sandock Account Settings.
-
-The raw key is a one-time secret. Do not use browser text extraction, screenshots, clipboard output, terminal output, command-line arguments, temporary files, shell history, browser storage, or heap snapshots to transfer or recover it. Those mechanisms either expose the secret or are unreliable after the UI discards its React state.
-
-If key creation succeeds but the atomic handoff fails, stop immediately. Do not navigate away, close the dialog, scan browser memory, or create a replacement key automatically. Report that no sandbox deployment was started, identify the newly created key by its non-secret name, and ask the user whether to create one replacement key in a fresh armed attempt. Do not revoke, rotate, or otherwise modify the failed-attempt key without explicit authorization.
-
-If no browser capability is available, provide `https://sandock.ai/sign-in`, ask the user to sign in and configure `SANDOCK_API_KEY` locally, then pause. Do not create a sandbox until a key is available.
-
-## Deploy
-
-Resolve the directory containing this `SKILL.md` as `<skill-directory>`, then run:
+Install the latest CLI into a task-local temporary directory without modifying the repository or a global installation:
 
 ```bash
-node "<skill-directory>/scripts/deploy.mjs" --json
+sandock_cli_dir=$(mktemp -d /tmp/sandock-agent-cli.XXXXXX)
+npm install --prefix "$sandock_cli_dir" --no-audit --no-fund sandock-cli@latest
+"$sandock_cli_dir/node_modules/.bin/sandock" --version
+"$sandock_cli_dir/node_modules/.bin/sandock" login --help
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox create --help
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox preview --help
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox revoke-preview --help
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox exec --help
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox info --help
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox delete --help
 ```
 
-Pass the acquired Sandock key only as `SANDOCK_API_KEY` in the child process environment. Do not interpolate it into the command string.
+Keep the resolved directory for subsequent commands, including across shell sessions. Ensure the current Node runtime satisfies the installed package's engine requirement. Treat a successful `sandock-cli@latest` install plus the version and help checks above as the capability gate; do not rely on a hardcoded minimum version. If installation fails or any required command is missing, stop before creation and report the published-package incompatibility instead of falling back to SDK modules, direct HTTP calls, browser key capture, or a repository-local build.
 
-`capture-and-deploy.mjs` imports `deployAgent` and calls it with an ephemeral environment object containing `SANDOCK_API_KEY`. Never log or return that environment object. Use `deploy.mjs` directly only when `SANDOCK_API_KEY` was already available before browser key creation.
+Use the CLI's configured API URL, defaulting to `https://sandock.ai`. If the user specifies another endpoint, use `sandock config --set-url <endpoint>` before login (prefer an isolated `XDG_CONFIG_HOME` for a development account and preserve it across every command); credentials and deployment must use the same endpoint. Do not print configuration files or credentials.
 
-The script creates a one-hour sandbox, clones the latest public Bunny Agent `main`, records the exact commit, builds the runner and web app, starts the web service with `SANDBOX_PROVIDER=local`, creates a signed Preview URL, and waits for `/example` to return three consecutive successful HTTP responses.
+## Device Authentication
 
-Do not automatically retry a failed deployment. The script attempts to delete an incomplete sandbox. Report the error, include the sandbox ID when one was created, and include the script's manual-cleanup warning if deletion failed. Then wait for the user to decide whether to retry.
+Reuse a working CLI login. A read-only `sandock sandbox list` can check it; distinguish an authentication failure from a network/service error. When authentication is needed, run the following in a persistent process:
 
-Use `--dry-run --json` only when the user explicitly asks to inspect the deployment without creating resources.
+```bash
+"$sandock_cli_dir/node_modules/.bin/sandock" login --no-browser
+```
+
+Give the user the authorization URL and one-time user code printed by the CLI. Ask them to complete device authorization in their own browser. Keep the CLI polling while waiting; never approve the device on their behalf. Continue only after the CLI reports `API key saved. You are signed in.` A user message saying authorization is complete is not a substitute for CLI success.
+
+The CLI exchanges the device code and saves the API key locally. Do not extract it through browser text, screenshots, clipboard, CDP, or chat. If a configured key needs replacement, respect the CLI's confirmation instead of automatically answering yes. On denial, expiry, or cancellation, stop before creating a sandbox and report the result; do not loop through new device requests automatically.
+
+## Create One Sandbox With The CLI
+
+```bash
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox create \
+  --image node:24.18.0-bookworm --cpu 2000 --memory 4096 --active-deadline-seconds 3600 --auto-delete-interval 0
+```
+
+Append `--space <space-id>` only when the user explicitly specified `sandock-space`. Capture the returned sandbox ID immediately and reuse it throughout deployment and cleanup. Do not issue a second create call via the SDK or the old deployment script. If creation times out without an ID, reconcile with the read-only sandbox list before considering another attempt.
+
+The CLI requests a maximum runtime of 3600 seconds and deletion after stopping (auto-delete interval 0 minutes). The service scheduler enforces these settings; do not promise deletion at an exact wall-clock instant. Signed URL expiry is separate from sandbox runtime.
+
+## Finish Deployment In That Sandbox
+
+Creation starts the sandbox; no separate start call is needed. Use the installed CLI executable for every command below (the short `sandock` spelling means that executable, not an older global installation).
+
+1. Run `sandock sandbox info <sandbox-id>` and confirm RUNNING before setup. If it is still starting, poll with a bounded wait; if it stops, expires, or errors, follow failure cleanup.
+2. Execute [Bunny Agent setup](references/bunny-agent-cli-setup.md), entirely through `sandock sandbox exec`. Capture the exact source commit and check each remote exit code and timeout status.
+3. Run `sandock sandbox preview <sandbox-id> --port 3000 --expires-in 3600`. Capture the returned URL and set its path to `/example`, preserving the hostname and query parameters.
+4. Probe the signed `/example` URL with an ordinary HTTP client such as curl. Require three consecutive successful HTTP responses, one second apart, with a five-second request timeout and a two-minute overall limit. This checks the deployed web page, not a Sandock management API. Return success only after readiness passes.
+
+On a failed deployment, clean up only the sandbox created by this invocation:
+
+```bash
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox delete <sandbox-id> --force
+```
+
+Report the failure and sandbox ID, plus a manual-cleanup warning if deletion fails. Do not automatically retry deployment or create a second sandbox. For an explicit dry run, show the CLI commands and setup recipe without login, creation, or other account changes. When the user asks to remove an existing deployment, use the same delete command for their specified sandbox.
+
+## Revoke A Generated Preview
+
+When the user asks to cancel/revoke an existing Preview, use the same CLI account and sandbox ID:
+
+```bash
+"$sandock_cli_dir/node_modules/.bin/sandock" sandbox revoke-preview <sandbox-id> <token>
+```
+
+The CLI owns the revocation request; do not implement signing, expiration, or revocation separately. For a generated URL shaped `https://3000-t0123456789abcde.<proxy-domain>/example`, the token is `t0123456789abcde` (the first hostname label after the port and hyphen). Keep it private. If the URL format differs, check the installed CLI documentation rather than guessing. Do not generate another URL to retrieve the token: generation may refresh/reuse an existing token.
+
+Revocation withdraws access through that token and does not delete the sandbox or stop its billing. URLs sharing that token are affected. Report API success only after the command succeeds; do not claim existing connections closed or that every proxy cache was instantly invalidated. Do not create a new sandbox or automatically regenerate the revoked link.
 
 ## Return The Result
 
@@ -56,7 +93,7 @@ If the host supports a Preview panel, open the returned URL there. Always provid
 
 On success, tell the user:
 
-- The Agent Preview URL and that it expires in one hour.
+- The Agent Preview URL, its one-hour URL expiry, sandbox ID, source commit, and remaining sandbox runtime (the one-hour sandbox clock already includes build time). The link stops working when either the sandbox stops or the token expires/is revoked.
 - Open `Settings`, enter an Anthropic, OpenAI, or Gemini API key, then select the corresponding runner and model shown by the current Bunny Agent UI before chatting.
 - The LLM key is stored in browser `localStorage` and is sent with chat requests to this Preview instance.
 - The signed Preview URL acts as a temporary access credential and must not be shared publicly.
